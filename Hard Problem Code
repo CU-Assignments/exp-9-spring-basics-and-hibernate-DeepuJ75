@@ -1,0 +1,154 @@
+CREATE DATABASE bankdb;
+
+USE bankdb;
+
+CREATE TABLE Account (
+    id INT PRIMARY KEY AUTO_INCREMENT,
+    name VARCHAR(50),
+    balance DOUBLE
+);
+
+import javax.persistence.*;
+
+@Entity
+public class Account {
+    @Id
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    private int id;
+
+    private String name;
+    private double balance;
+
+    public Account() {}
+    public Account(String name, double balance) {
+        this.name = name;
+        this.balance = balance;
+    }
+
+    // Getters and Setters
+}
+import javax.persistence.*;
+import java.util.Date;
+
+@Entity
+public class TransactionLog {
+    @Id
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    private int id;
+
+    private String description;
+    private Date date;
+
+    public TransactionLog() {}
+    public TransactionLog(String description) {
+        this.description = description;
+        this.date = new Date();
+    }
+
+    // Getters and Setters
+}
+<hibernate-configuration>
+    <session-factory>
+        <property name="hibernate.connection.driver_class">com.mysql.cj.jdbc.Driver</property>
+        <property name="hibernate.connection.url">jdbc:mysql://localhost:3306/bankdb</property>
+        <property name="hibernate.connection.username">root</property>
+        <property name="hibernate.connection.password">yourpassword</property>
+        <property name="hibernate.dialect">org.hibernate.dialect.MySQLDialect</property>
+        <property name="hibernate.hbm2ddl.auto">update</property>
+        <property name="show_sql">true</property>
+
+        <mapping class="Account"/>
+        <mapping class="TransactionLog"/>
+    </session-factory>
+</hibernate-configuration>
+import org.springframework.context.annotation.*;
+import org.springframework.orm.hibernate5.HibernateTransactionManager;
+import org.springframework.orm.hibernate5.LocalSessionFactoryBean;
+
+import javax.sql.DataSource;
+import org.springframework.jdbc.datasource.DriverManagerDataSource;
+import java.util.Properties;
+
+@Configuration
+@EnableTransactionManagement
+public class AppConfig {
+
+    @Bean
+    public DataSource dataSource() {
+        DriverManagerDataSource ds = new DriverManagerDataSource();
+        ds.setDriverClassName("com.mysql.cj.jdbc.Driver");
+        ds.setUrl("jdbc:mysql://localhost:3306/bankdb");
+        ds.setUsername("root");
+        ds.setPassword("yourpassword");
+        return ds;
+    }
+
+    @Bean
+    public LocalSessionFactoryBean sessionFactory() {
+        LocalSessionFactoryBean factory = new LocalSessionFactoryBean();
+        factory.setDataSource(dataSource());
+        factory.setPackagesToScan("your.package"); // replace with actual package
+        Properties props = new Properties();
+        props.setProperty("hibernate.dialect", "org.hibernate.dialect.MySQLDialect");
+        props.setProperty("hibernate.hbm2ddl.auto", "update");
+        props.setProperty("show_sql", "true");
+        factory.setHibernateProperties(props);
+        return factory;
+    }
+
+    @Bean
+    public HibernateTransactionManager transactionManager() {
+        HibernateTransactionManager txManager = new HibernateTransactionManager();
+        txManager.setSessionFactory(sessionFactory().getObject());
+        return txManager;
+    }
+}
+import org.hibernate.Session;
+import org.hibernate.SessionFactory;
+import org.springframework.transaction.annotation.Transactional;
+
+public class BankingService {
+
+    private SessionFactory sessionFactory;
+
+    public BankingService(SessionFactory sessionFactory) {
+        this.sessionFactory = sessionFactory;
+    }
+
+    @Transactional
+    public void transferMoney(int fromId, int toId, double amount) {
+        Session session = sessionFactory.getCurrentSession();
+
+        Account from = session.get(Account.class, fromId);
+        Account to = session.get(Account.class, toId);
+
+        if (from.getBalance() < amount) {
+            throw new RuntimeException("Insufficient balance!");
+        }
+
+        from.setBalance(from.getBalance() - amount);
+        to.setBalance(to.getBalance() + amount);
+
+        session.update(from);
+        session.update(to);
+
+        // Optional: Add transaction log
+        session.save(new TransactionLog("Transferred ₹" + amount + " from " + from.getName() + " to " + to.getName()));
+    }
+}
+import org.springframework.context.ApplicationContext;
+import org.springframework.context.annotation.AnnotationConfigApplicationContext;
+
+public class Main {
+    public static void main(String[] args) {
+        ApplicationContext context = new AnnotationConfigApplicationContext(AppConfig.class);
+        BankingService service = new BankingService(context.getBean(SessionFactory.class));
+
+        try {
+            service.transferMoney(1, 2, 1000.0);
+            System.out.println("Transaction successful.");
+        } catch (Exception e) {
+            System.out.println("Transaction failed: " + e.getMessage());
+        }
+    }
+}
